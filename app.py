@@ -218,9 +218,29 @@ def load_docx_file(uploaded_file):
         
         # Combine all tables
         try:
-            # Find common columns across all tables
-            all_columns = set()
+            # Filter tables that contain NDIS codes
+            valid_tables = []
             for table_data in all_tables_data:
+                df = table_data['dataframe']
+                # Check if any column contains NDIS code patterns (e.g., XX_XXXXXXXX_XXXX_X_X)
+                has_ndis_codes = any(
+                    df[col].astype(str).str.match(r'^\d+_\d+.*').any() 
+                    for col in df.columns
+                )
+                if has_ndis_codes:
+                    valid_tables.append(table_data)
+            
+            if not valid_tables:
+                # Fallback: return the largest table
+                largest_table = max(all_tables_data, key=lambda x: x['row_count'])
+                st.warning(f"No tables with NDIS codes found. Using largest table (Table {largest_table['table_index'] + 1}) with {largest_table['row_count']} rows")
+                return largest_table['dataframe']
+            
+            all_tables_data = valid_tables
+            
+            # Find common columns across valid tables
+            all_columns = set()
+            for table_data in valid_tables:
                 all_columns.update(table_data['dataframe'].columns)
             
             # Remove Source_Table from common columns check
