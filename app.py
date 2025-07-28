@@ -150,7 +150,7 @@ def load_file(uploaded_file):
         return None
 
 def load_docx_file(uploaded_file):
-    """Extract table data from DOCX file"""
+    """Extract and combine all table data from DOCX file"""
     from docx import Document
     
     # Save uploaded file temporarily
@@ -165,8 +165,9 @@ def load_docx_file(uploaded_file):
         # Load the document
         doc = Document(tmp_file_path)
         
-        # Find tables in the document
-        tables_data = []
+        # Find all tables in the document
+        all_tables_data = []
+        combined_data = []
         
         for table_idx, table in enumerate(doc.tables):
             # Extract table data
@@ -181,49 +182,92 @@ def load_docx_file(uploaded_file):
                 
                 table_data.append(row_data)
             
-            if table_data:
-                # Convert to DataFrame
-                if len(table_data) > 1:
-                    # Use first row as headers
-                    headers = table_data[0]
-                    data_rows = table_data[1:]
-                    
-                    # Create DataFrame
+            if table_data and len(table_data) > 1:  # Need at least header + 1 data row
+                # Use first row as headers
+                headers = [col.strip() for col in table_data[0]]
+                data_rows = table_data[1:]
+                
+                # Filter out empty rows
+                data_rows = [row for row in data_rows if any(cell.strip() for cell in row)]
+                
+                if data_rows:  # Only add if we have actual data
+                    # Create DataFrame for this table
                     df = pd.DataFrame(data_rows, columns=headers)
                     
-                    # Clean column names
-                    df.columns = [col.strip() for col in df.columns]
+                    # Clean empty columns
+                    df = df.loc[:, df.columns != '']  # Remove columns with empty names
+                    df = df.dropna(how='all', axis=1)  # Remove columns that are all NaN
                     
-                    tables_data.append({
+                    all_tables_data.append({
                         'table_index': table_idx,
                         'dataframe': df,
-                        'row_count': len(df)
+                        'row_count': len(df),
+                        'headers': headers
                     })
+                    
+                    # Add table identifier column to track source
+                    df['Source_Table'] = f"Table_{table_idx + 1}"
+                    combined_data.append(df)
         
         # Clean up temporary file
         os.unlink(tmp_file_path)
         
-        if not tables_data:
-            st.error("No tables found in the DOCX file")
+        if not all_tables_data:
+            st.error("No valid tables found in the DOCX file")
             return None
         
-        # If multiple tables found, let user choose or use the largest one
-        if len(tables_data) > 1:
-            st.info(f"Found {len(tables_data)} tables in the DOCX file. Using the largest table.")
-            # Use the table with the most rows
-            selected_table = max(tables_data, key=lambda x: x['row_count'])
-        else:
-            selected_table = tables_data[0]
-        
-        df = selected_table['dataframe']
-        
-        # Show preview to user
-        with st.expander(f"📋 DOCX Table Preview (Table {selected_table['table_index'] + 1})"):
-            st.write(f"**Rows:** {len(df)}, **Columns:** {len(df.columns)}")
-            st.write("**Column Names:**", list(df.columns))
-            st.dataframe(df.head(), use_container_width=True)
-        
-        return df
+        # Combine all tables
+        try:
+            # Find common columns across all tables
+            all_columns = set()
+            for table_data in all_tables_data:
+                all_columns.update(table_data['dataframe'].columns)
+            
+            # Remove Source_Table from common columns check
+            common_columns = all_columns.copy()
+            common_columns.discard('Source_Table')
+            
+            # Try to standardize column names across tables
+            standardized_tables = []
+            for table_data in all_tables_data:
+                df = table_data['dataframe'].copy()
+                
+                # Add missing columns with empty values
+                for col in common_columns:
+                    if col not in df.columns:
+                        df[col] = ''
+                
+                # Reorder columns consistently
+                column_order = sorted(common_columns) + ['Source_Table']
+                df = df.reindex(columns=column_order, fill_value='')
+                
+                standardized_tables.append(df)
+            
+            # Combine all tables
+            combined_df = pd.concat(standardized_tables, ignore_index=True, sort=False)
+            
+            # Show summary to user
+            with st.expander(f"📋 DOCX Tables Summary - Combined {len(all_tables_data)} tables"):
+                st.write(f"**Total Tables Found:** {len(all_tables_data)}")
+                st.write(f"**Total Combined Rows:** {len(combined_df)}")
+                st.write(f"**Combined Columns:** {list(combined_df.columns)}")
+                
+                # Show individual table info
+                for i, table_data in enumerate(all_tables_data):
+                    st.write(f"**Table {i + 1}:** {table_data['row_count']} rows, Columns: {table_data['headers']}")
+                
+                # Show preview of combined data
+                st.write("**Combined Data Preview:**")
+                st.dataframe(combined_df.head(10), use_container_width=True)
+            
+            return combined_df
+            
+        except Exception as e:
+            st.error(f"Error combining tables: {str(e)}")
+            # Fallback: return the largest table
+            largest_table = max(all_tables_data, key=lambda x: x['row_count'])
+            st.warning(f"Falling back to largest table (Table {largest_table['table_index'] + 1}) with {largest_table['row_count']} rows")
+            return largest_table['dataframe']
         
     except Exception as e:
         # Clean up temporary file

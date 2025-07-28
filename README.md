@@ -69,11 +69,12 @@ Support_Item_Number,Support_Item_Name,Category,Description,Unit_Price
 
 **For DOCX files:**
 
-- The document should contain one or more tables with support item information
+- The document can contain multiple tables with support item information
+- All tables will be automatically detected and combined into a single dataset
 - The first row of each table should contain column headers
-- The application will automatically detect and extract the largest table
-- Column names can vary (e.g., "Item Number" instead of "Support_Item_Number")
-- The application will attempt to identify columns by analyzing content patterns
+- The application will track which table each item came from using a `Source_Table` identifier
+- Column names can vary across tables (e.g., "Item Number" vs "Support_Item_Number")
+- The application will standardize column names and combine all data for comprehensive analysis
 
 ## Installation and Usage
 

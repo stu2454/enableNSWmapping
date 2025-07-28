@@ -120,7 +120,7 @@ class CrosswalkAnalyzer:
         column_mappings = {
             'Support_Item_Number': [
                 'Support_Item_Number', 'Support Item Number', 'Item Number', 
-                'Code', 'Support Code', 'NDIS Code', 'Item Code'
+                'Code', 'Support Code', 'NDIS Code', 'Item Code', 'Number'
             ],
             'Support_Item_Name': [
                 'Support_Item_Name', 'Support Item Name', 'Item Name', 
@@ -139,6 +139,11 @@ class CrosswalkAnalyzer:
         
         # Create a copy to avoid modifying original
         df = ndis_df.copy()
+        
+        # Preserve Source_Table column if it exists
+        source_table_col = None
+        if 'Source_Table' in df.columns:
+            source_table_col = df['Source_Table'].copy()
         
         # Standardize column names
         for standard_name, variations in column_mappings.items():
@@ -160,10 +165,18 @@ class CrosswalkAnalyzer:
             if col not in df.columns:
                 raise ValueError(f"Could not identify required column: {col}")
         
-        # Clean data
-        df = df.dropna(subset=['Support_Item_Number', 'Support_Item_Name'])
+        # Clean data - remove rows where both required columns are empty
+        df = df.dropna(subset=['Support_Item_Number', 'Support_Item_Name'], how='all')
+        
+        # Clean and standardize the data
         df['Support_Item_Number'] = df['Support_Item_Number'].astype(str).str.strip()
         df['Support_Item_Name'] = df['Support_Item_Name'].astype(str).str.strip()
+        
+        # Remove rows with empty or invalid codes/names
+        df = df[df['Support_Item_Number'] != '']
+        df = df[df['Support_Item_Number'] != 'nan']
+        df = df[df['Support_Item_Name'] != '']
+        df = df[df['Support_Item_Name'] != 'nan']
         
         # Add missing optional columns
         if 'Category' not in df.columns:
@@ -172,6 +185,10 @@ class CrosswalkAnalyzer:
             df['Description'] = df['Support_Item_Name']
         if 'Unit_Price' not in df.columns:
             df['Unit_Price'] = 0
+        
+        # Restore Source_Table column if it existed
+        if source_table_col is not None:
+            df['Source_Table'] = source_table_col
         
         return df
     
@@ -315,6 +332,7 @@ class CrosswalkAnalyzer:
                 'NDIS_Category': None,
                 'NDIS_Description': None,
                 'NDIS_Unit_Price': None,
+                'NDIS_Source_Table': None,  # Track which table the match came from
                 'Mapping_Confidence': 'No clear equivalent (Review required)',
                 'Match_Score': 0,
                 'Matching_Method': 'None',
@@ -342,6 +360,7 @@ class CrosswalkAnalyzer:
                         'NDIS_Category': best_match.get('Category', rule_match['ndis_category']),
                         'NDIS_Description': best_match.get('Description', ''),
                         'NDIS_Unit_Price': best_match.get('Unit_Price', 0),
+                        'NDIS_Source_Table': best_match.get('Source_Table', 'Unknown'),
                         'Mapping_Confidence': rule_match['confidence'],
                         'Match_Score': rule_match['match_score'],
                         'Matching_Method': 'Rule-based',
@@ -368,6 +387,7 @@ class CrosswalkAnalyzer:
                         'NDIS_Category': best_match.get('Category', ''),
                         'NDIS_Description': best_match.get('Description', ''),
                         'NDIS_Unit_Price': best_match.get('Unit_Price', 0),
+                        'NDIS_Source_Table': best_match.get('Source_Table', 'Unknown'),
                         'Mapping_Confidence': self.determine_confidence_level(best_fuzzy['score']),
                         'Match_Score': best_fuzzy['score'],
                         'Matching_Method': 'Fuzzy matching',
